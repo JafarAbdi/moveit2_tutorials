@@ -33,7 +33,6 @@ def load_yaml(package_name, file_path):
 
 
 def generate_launch_description():
-
     # Command-line arguments
     tutorial_arg = DeclareLaunchArgument(
         "rviz_tutorial", default_value="False", description="Tutorial flag"
@@ -47,7 +46,6 @@ def generate_launch_description():
             "panda.urdf.xacro",
         )
     )
-    robot_description = {"robot_description": robot_description_config.toxml()}
 
     robot_description_semantic_config = load_file(
         "moveit_resources_panda_moveit_config", "config/panda.srdf"
@@ -98,14 +96,43 @@ def generate_launch_description():
     }
 
     # Start the actual move_group node/action server
-    run_move_group_node = Node(
+    run_move_group_node_1 = Node(
         package="moveit_ros_move_group",
         executable="move_group",
         output="screen",
+        namespace="arm_1",
         parameters=[
-            robot_description,
+            {
+                "planning_scene_monitor_options": {
+                    "robot_description": "robot_description",
+                    "joint_state_topic": "/joint_states",
+                }
+            },
+            {"robot_description": robot_description_config.toxml()},
             robot_description_semantic,
-            kinematics_yaml,
+            robot_description_kinematics,
+            ompl_planning_pipeline_config,
+            trajectory_execution,
+            moveit_controllers,
+            planning_scene_monitor_parameters,
+        ],
+    )
+
+    run_move_group_node_2 = Node(
+        package="moveit_ros_move_group",
+        executable="move_group",
+        output="screen",
+        namespace="arm_2",
+        parameters=[
+            {
+                "planning_scene_monitor_options": {
+                    "robot_description": "robot_description",
+                    "joint_state_topic": "/joint_states",
+                }
+            },
+            {"robot_description": robot_description_config.toxml()},
+            robot_description_semantic,
+            robot_description_kinematics,
             ompl_planning_pipeline_config,
             trajectory_execution,
             moveit_controllers,
@@ -118,20 +145,7 @@ def generate_launch_description():
     rviz_base = os.path.join(get_package_share_directory("moveit2_tutorials"), "launch")
     rviz_full_config = os.path.join(rviz_base, "panda_moveit_config_demo.rviz")
     rviz_empty_config = os.path.join(rviz_base, "panda_moveit_config_demo_empty.rviz")
-    rviz_node_tutorial = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2",
-        output="log",
-        arguments=["-d", rviz_empty_config],
-        parameters=[
-            robot_description,
-            robot_description_semantic,
-            ompl_planning_pipeline_config,
-            kinematics_yaml,
-        ],
-        condition=IfCondition(tutorial_mode),
-    )
+
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
@@ -139,12 +153,20 @@ def generate_launch_description():
         output="log",
         arguments=["-d", rviz_full_config],
         parameters=[
-            robot_description,
-            robot_description_semantic,
+            {
+                "arm_1": {
+                    "robot_description": robot_description_config.toxml(),
+                    "robot_description_semantic": robot_description_semantic_config,
+                    "robot_description_kinematics": kinematics_yaml,
+                },
+                "arm_2": {
+                    "robot_description": robot_description_config.toxml(),
+                    "robot_description_semantic": robot_description_semantic_config,
+                    "robot_description_kinematics": kinematics_yaml,
+                },
+            },
             ompl_planning_pipeline_config,
-            kinematics_yaml,
         ],
-        condition=UnlessCondition(tutorial_mode),
     )
 
     # Static TF
@@ -162,7 +184,7 @@ def generate_launch_description():
         executable="robot_state_publisher",
         name="robot_state_publisher",
         output="both",
-        parameters=[robot_description],
+        parameters=[{"robot_description": robot_description_config.toxml()}],
     )
 
     # ros2_control using FakeSystem as hardware
@@ -174,7 +196,10 @@ def generate_launch_description():
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[robot_description, ros2_controllers_path],
+        parameters=[
+            {"robot_description": robot_description_config.toxml()},
+            ros2_controllers_path,
+        ],
         output={
             "stdout": "screen",
             "stderr": "screen",
@@ -183,7 +208,11 @@ def generate_launch_description():
 
     # Load controllers
     load_controllers = []
-    for controller in ["panda_arm_controller", "joint_state_controller"]:
+    for controller in [
+        "panda_arm_controller",
+        "panda_hand_controller",
+        "joint_state_controller",
+    ]:
         load_controllers += [
             ExecuteProcess(
                 cmd=["ros2 run controller_manager spawner.py {}".format(controller)],
@@ -208,12 +237,12 @@ def generate_launch_description():
         [
             tutorial_arg,
             rviz_node,
-            rviz_node_tutorial,
             static_tf,
             robot_state_publisher,
-            run_move_group_node,
+            run_move_group_node_1,
+            run_move_group_node_2,
             ros2_control_node,
-            mongodb_server_node,
+            # mongodb_server_node,
         ]
         + load_controllers
     )
